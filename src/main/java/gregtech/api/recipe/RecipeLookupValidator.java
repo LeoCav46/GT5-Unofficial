@@ -98,7 +98,7 @@ public final class RecipeLookupValidator {
         if (propertyValue != null) {
             return Boolean.parseBoolean(propertyValue);
         }
-        return shouldValidateLookup();
+        return shouldValidateLookup() || RecipeDuplicateValidator.shouldValidateDuplicates();
     }
 
     private static String recipeMapName(@Nullable RecipeMap<?> recipeMap) {
@@ -131,7 +131,7 @@ public final class RecipeLookupValidator {
             + describeRecipeStackTrace(recipe);
     }
 
-    private static String describeRecipeListForValidation(List<GTRecipe> recipes) {
+    static String describeRecipeListForValidation(List<GTRecipe> recipes) {
         return recipes.stream()
             .map(RecipeLookupValidator::describeRecipeForValidation)
             .collect(Collectors.joining("\n    ", "[\n    ", "\n]"));
@@ -880,10 +880,10 @@ public final class RecipeLookupValidator {
 
     static final class RecipeLookupValidationTarget {
 
-        private final String mapName;
-        private final RecipeMapBackend backend;
+        final String mapName;
+        final RecipeMapBackend backend;
 
-        private RecipeLookupValidationTarget(String mapName, RecipeMapBackend backend) {
+        RecipeLookupValidationTarget(String mapName, RecipeMapBackend backend) {
             this.mapName = mapName;
             this.backend = backend;
         }

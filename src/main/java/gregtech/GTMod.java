@@ -11,6 +11,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -70,6 +71,7 @@ import gregtech.api.modularui2.GTGuiTheme;
 import gregtech.api.modularui2.GTGuis;
 import gregtech.api.objects.ItemData;
 import gregtech.api.objects.XSTR;
+import gregtech.api.recipe.RecipeDuplicateValidator;
 import gregtech.api.recipe.RecipeLookupValidator;
 import gregtech.api.recipe.RecipeMapBackend;
 import gregtech.api.registries.LHECoolantRegistry;
@@ -752,15 +754,64 @@ public class GTMod {
     @Mod.EventHandler
     public void onServerStarted(FMLServerStartedEvent event) {
         proxy.onServerStarted(event);
-        if (RecipeMapBackend.shouldValidateLookup()) {
-            GT_FML_LOGGER.info("GTRecipeLookupValidator: enabled; waiting for first server tick after server start.");
+        if (RecipeMapBackend.shouldValidateLookup() || RecipeDuplicateValidator.shouldValidateDuplicates()) {
+            GT_FML_LOGGER.info(
+                "GT recipe validation: enabled lookup={} duplicates={}; waiting for first server tick after server start.",
+                RecipeMapBackend.shouldValidateLookup(),
+                RecipeDuplicateValidator.shouldValidateDuplicates());
             FMLCommonHandler.instance()
                 .bus()
-                .register(new RecipeLookupValidationServerTickHandler());
+                .register(new RecipeValidationServerTickHandler());
         }
     }
 
-    public static final class RecipeLookupValidationServerTickHandler {
+    static void runRecipeValidationsForTesting(boolean validateLookup, boolean validateDuplicates, Runnable lookupRunner,
+        Runnable duplicateRunner) {
+        runRecipeValidations(validateLookup, validateDuplicates, lookupRunner, duplicateRunner);
+    }
+
+    private static void runRecipeValidations(boolean validateLookup, boolean validateDuplicates, Runnable lookupRunner,
+        Runnable duplicateRunner) {
+        List<IllegalStateException> failures = new ArrayList<>();
+        if (validateLookup) {
+            try {
+                lookupRunner.run();
+            } catch (IllegalStateException e) {
+                failures.add(e);
+            }
+        }
+        if (validateDuplicates) {
+            try {
+                duplicateRunner.run();
+            } catch (IllegalStateException e) {
+                failures.add(e);
+            }
+        }
+        if (!failures.isEmpty()) {
+            throw combinedRecipeValidationException(failures);
+        }
+        throw new IllegalStateException("GT recipe validation found 0 issue(s); run completed.");
+    }
+
+    private static IllegalStateException combinedRecipeValidationException(List<IllegalStateException> failures) {
+        if (failures.size() == 1) {
+            return failures.get(0);
+        }
+        StringBuilder message = new StringBuilder("GT recipe validation found issues in multiple validators.");
+        for (int i = 0; i < failures.size(); i++) {
+            message.append("\n\n")
+                .append(i + 1)
+                .append(") ")
+                .append(failures.get(i).getMessage());
+        }
+        IllegalStateException combined = new IllegalStateException(message.toString());
+        for (IllegalStateException failure : failures) {
+            combined.addSuppressed(failure);
+        }
+        return combined;
+    }
+
+    public static final class RecipeValidationServerTickHandler {
 
         @SubscribeEvent
         public void onServerTick(TickEvent.ServerTickEvent event) {
@@ -770,10 +821,15 @@ public class GTMod {
             FMLCommonHandler.instance()
                 .bus()
                 .unregister(this);
-            GT_FML_LOGGER.info("GTRecipeLookupValidator: first server tick reached; starting validation.");
-            RecipeLookupValidator.validateLookup();
-            GT_FML_LOGGER.info("GTRecipeLookupValidator: validation completed without mismatches.");
-            throw new IllegalStateException("GT recipe lookup validation found 0 issue(s); run completed.");
+            GT_FML_LOGGER.info(
+                "GT recipe validation: first server tick reached; starting lookup={} duplicates={}.",
+                RecipeMapBackend.shouldValidateLookup(),
+                RecipeDuplicateValidator.shouldValidateDuplicates());
+            runRecipeValidations(
+                RecipeMapBackend.shouldValidateLookup(),
+                RecipeDuplicateValidator.shouldValidateDuplicates(),
+                RecipeLookupValidator::validateLookup,
+                RecipeDuplicateValidator::validateDuplicates);
         }
     }
 
